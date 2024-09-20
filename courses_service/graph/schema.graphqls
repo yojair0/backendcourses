@@ -1,0 +1,32 @@
+# Definición de tipos
+type Course {
+  id: ID!
+  title: String!
+  description: String!
+  category: String!
+  price: Float!
+  created_at: String!
+}
+
+# Entrada para crear un nuevo curso
+input NewCourse {
+  title: String!
+  description: String!
+  category: String!
+  price: Float!
+}
+
+# Tipos de consulta
+type Query {
+  courses: [Course!]!                # Obtener todos los cursos
+  course(id: ID!): Course            # Obtener un curso por ID
+  filterCourses(category: String, minPrice: Float, maxPrice: Float): [Course!]!  # Filtrar cursos por categoría y precio
+}
+
+# Tipos de mutación
+type Mutation {
+  AddToCart(courseID: String!, userID: String!): String!
+  createCourse(input: NewCourse!): Course!
+  deleteCourse(id: ID!): String
+  clearCart: String!
+}
