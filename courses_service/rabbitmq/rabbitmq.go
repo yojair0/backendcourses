@@ -184,3 +184,36 @@ func NotifyNewCourse(course model.Course) error {
 	log.Printf("New course notification sent: %s", courseDetails)
 	return nil
 }
+
+func ConsumeCourseDetails() {
+	ch, err := ConnectRabbitMQ()
+	if err != nil {
+		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
+	}
+	defer ch.Close()
+
+	msgs, err := ch.Consume(
+		"get_course_details", // nombre de la cola
+		"",                   // consumer
+		true,                 // auto-ack
+		false,                // exclusive
+		false,                // no-local
+		false,                // no-wait
+		nil,                  // args
+	)
+	if err != nil {
+		log.Fatalf("Failed to register a consumer: %v", err)
+	}
+
+	forever := make(chan bool)
+
+	go func() {
+		for d := range msgs {
+			log.Printf("Received a message: %s", d.Body)
+			// Procesar los detalles del curso aquí
+		}
+	}()
+
+	log.Printf("Waiting for messages. To exit press CTRL+C")
+	<-forever
+}
