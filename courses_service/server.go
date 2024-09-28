@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"courses_service/graph"
+	"courses_service/rabbitmq"
 
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/99designs/gqlgen/graphql/playground"
@@ -47,6 +48,13 @@ func main() {
 
 	fmt.Println("Connected to MongoDB")
 
+	// nuevoooooooo
+	// Crear la cola para notificaciones de nuevos cursos
+	err = rabbitmq.CreateQueue("new_courses_notifications")
+	if err != nil {
+		log.Fatalf("Error creating queue: %v", err)
+	}
+
 	// Configurar el servidor GraphQL
 	srv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{
 		Resolvers: &graph.Resolver{DB: db, CourseCollection: courseCollection},
@@ -55,6 +63,24 @@ func main() {
 	http.Handle("/", playground.Handler("GraphQL playground", "/query"))
 	http.Handle("/query", srv)
 
+	// Prueba RabbitMQ
+	// Llamar a la función de prueba
+	testRabbitMQ()
+
+	// Continuar con el resto del código
 	log.Printf("connect to http://localhost:8080/ for GraphQL playground")
 	log.Fatal(http.ListenAndServe(":8080", nil))
+
+}
+
+// Agregar esta función de prueba en `main.go` después de configurar el servidor
+func testRabbitMQ() {
+	// Reemplaza con un ID de curso válido para probar
+	courseID := "curso123"
+	err := rabbitmq.SendCourseDetails(courseID)
+	if err != nil {
+		log.Fatalf("Error sending course details: %v", err)
+	} else {
+		log.Println("Successfully sent course details to RabbitMQ")
+	}
 }

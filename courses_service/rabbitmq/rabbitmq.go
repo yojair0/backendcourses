@@ -96,6 +96,19 @@ func SendCourseDetails(courseID string) error {
 		return fmt.Errorf("Error marshaling course details: %v", err)
 	}
 
+	// Declarar la cola "get_course_details" antes de publicar
+	_, err = ch.QueueDeclare(
+		"get_course_details", // nombre de la cola
+		false,                // durable
+		false,                // delete when unused
+		false,                // exclusive
+		false,                // no-wait
+		nil,                  // arguments
+	)
+	if err != nil {
+		return fmt.Errorf("Failed to declare the queue: %v", err)
+	}
+
 	// Publicar los detalles del curso en la cola "get_course_details"
 	err = ch.Publish(
 		"",
@@ -112,5 +125,62 @@ func SendCourseDetails(courseID string) error {
 	}
 
 	log.Printf("Course details published to queue get_course_details: %s", courseDetails)
+	return nil
+}
+
+// creando la cola necesaria en RabbitMQ para manejar las notificaciones sobre nuevos cursos
+func CreateQueue(queueName string) error {
+	ch, err := ConnectRabbitMQ()
+	if err != nil {
+		return err
+	}
+	defer ch.Close()
+
+	_, err = ch.QueueDeclare(
+		queueName, // nombre de la cola
+		false,     // durable
+		false,     // delete when unused
+		false,     // exclusive
+		false,     // no-wait
+		nil,       // arguments
+	)
+	if err != nil {
+		return fmt.Errorf("Failed to declare a queue: %v", err)
+	}
+
+	log.Printf("Queue %s created successfully.", queueName)
+	return nil
+}
+
+// Cuando se cree un nuevo curso, enviar una notificación a RabbitMQ
+func NotifyNewCourse(course model.Course) error {
+	ch, err := ConnectRabbitMQ()
+	if err != nil {
+		return err
+	}
+	defer ch.Close()
+
+	// Serializa los detalles del curso a JSON
+	courseDetails, err := json.Marshal(course)
+	if err != nil {
+		return fmt.Errorf("Error marshaling course details: %v", err)
+	}
+
+	// Publica el mensaje en la cola de notificaciones de nuevos cursos
+	err = ch.Publish(
+		"",                          // exchange
+		"new_courses_notifications", // routing key (nombre de la cola)
+		false,
+		false,
+		amqp.Publishing{
+			ContentType: "application/json",
+			Body:        courseDetails,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("Error publishing message: %v", err)
+	}
+
+	log.Printf("New course notification sent: %s", courseDetails)
 	return nil
 }
