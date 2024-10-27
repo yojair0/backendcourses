@@ -28,6 +28,86 @@ func ConnectRabbitMQ() (*amqp.Channel, error) {
 	return ch, nil
 }
 
+func ConsumeAndRespond() {
+	ch, err := ConnectRabbitMQ()
+	if err != nil {
+		log.Fatalf("Error connecting to RabbitMQ: %v", err)
+	}
+	defer ch.Close()
+
+	queue := "get_course_details"
+
+	// Declara la cola para asegurarte de que existe antes de consumir
+	_, err = ch.QueueDeclare(
+		queue,
+		false, // durable
+		false, // delete when unused
+		false, // exclusive
+		false, // no-wait
+		nil,   // arguments
+	)
+	if err != nil {
+		log.Fatalf("Error declaring queue: %v", err)
+	}
+
+	msgs, err := ch.Consume(
+		queue,
+		"",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		log.Fatalf("Error registering consumer: %v", err)
+	}
+
+	log.Println("Esperando mensajes en", queue)
+
+	for d := range msgs {
+		var payload map[string]interface{}
+		err := json.Unmarshal(d.Body, &payload)
+		if err != nil {
+			log.Printf("Error al deserializar el mensaje: %v", err)
+			continue
+		}
+
+		courseId, ok := payload["courseId"].(string)
+		if !ok {
+			log.Printf("courseId no encontrado o no es una cadena")
+			continue
+		}
+
+		// Obtener los detalles del curso desde la base de datos
+		courseDetails, err := getCourseDetailsFromDB(courseId)
+		if err != nil {
+			log.Printf("Error al obtener detalles del curso desde la base de datos: %v", err)
+			continue
+		}
+
+		// Publicar la respuesta de vuelta a la cola especificada en ReplyTo
+		if d.ReplyTo != "" {
+			responseBody, _ := json.Marshal(courseDetails)
+			err = ch.Publish(
+				"",
+				d.ReplyTo, // Cola de respuesta desde ReplyTo
+				false,
+				false,
+				amqp.Publishing{
+					ContentType:   "application/json",
+					CorrelationId: d.CorrelationId,
+					Body:          responseBody,
+				})
+			if err != nil {
+				log.Printf("Error al enviar respuesta: %v", err)
+			} else {
+				log.Printf("Detalles del curso enviados de vuelta a la cola %s con CorrelationId %s", d.ReplyTo, d.CorrelationId)
+			}
+		}
+	}
+}
+
 // Publicar un mensaje en RabbitMQ
 func PublishMessage(queueName string, body []byte) error {
 	ch, err := ConnectRabbitMQ()
@@ -193,13 +273,13 @@ func ConsumeCourseDetails() {
 	defer ch.Close()
 
 	msgs, err := ch.Consume(
-		"get_course_details", // nombre de la cola
-		"",                   // consumer
-		true,                 // auto-ack
-		false,                // exclusive
-		false,                // no-local
-		false,                // no-wait
-		nil,                  // args
+		"get_course_details",
+		"",
+		true,
+		false,
+		false,
+		false,
+		nil,
 	)
 	if err != nil {
 		log.Fatalf("Failed to register a consumer: %v", err)
@@ -209,11 +289,73 @@ func ConsumeCourseDetails() {
 
 	go func() {
 		for d := range msgs {
-			log.Printf("Received a message: %s", d.Body)
-			// Procesar los detalles del curso aquí
+			var payload map[string]interface{}
+			err := json.Unmarshal(d.Body, &payload)
+			if err != nil {
+				log.Printf("Error al deserializar el mensaje: %v", err)
+				continue
+			}
+
+			courseId, ok := payload["courseId"].(string)
+			if !ok {
+				log.Printf("courseId no encontrado o no es una cadena")
+				continue
+			}
+
+			courseDetails, err := getCourseDetailsFromDB(courseId)
+			if err != nil {
+				log.Printf("Error al obtener detalles del curso desde la base de datos: %v", err)
+				continue
+			}
+
+			// Publicar respuesta de vuelta a la cola especificada en ReplyTo
+			if d.ReplyTo != "" {
+				responseBody, _ := json.Marshal(courseDetails)
+				err = ch.Publish(
+					"",
+					d.ReplyTo, // Cola de respuesta desde ReplyTo
+					false,
+					false,
+					amqp.Publishing{
+						ContentType:   "application/json",
+						CorrelationId: d.CorrelationId,
+						Body:          responseBody,
+					})
+				if err != nil {
+					log.Printf("Error al enviar respuesta: %v", err)
+				}
+			}
 		}
 	}()
 
-	log.Printf("Waiting for messages. To exit press CTRL+C")
+	log.Printf("Esperando mensajes en get_course_details. Para salir presiona CTRL+C")
 	<-forever
+}
+
+// Ejemplo de función para obtener los detalles del curso desde la base de datos
+// Función para obtener los detalles del curso desde la base de datos
+func getCourseDetailsFromDB(courseId string) (interface{}, error) {
+	// Conexión a MongoDB
+	client, err := mongo.Connect(context.TODO(), options.Client().ApplyURI(os.Getenv("MONGO_URI")))
+	if err != nil {
+		log.Printf("Error connecting to MongoDB: %v", err)
+		return nil, err
+	}
+	defer client.Disconnect(context.TODO())
+
+	// Selecciona la colección de cursos
+	courseCollection := client.Database("coursesDB").Collection("courses")
+	var courseDetails map[string]interface{}
+
+	// Busca el curso en la base de datos usando el campo `id` en lugar de `_id`
+	err = courseCollection.FindOne(context.TODO(), bson.M{"id": courseId}).Decode(&courseDetails)
+	if err != nil {
+		log.Printf("Error finding course with ID %s: %v", courseId, err)
+		return nil, err
+	}
+
+	// Log para verificar el contenido del curso encontrado
+	log.Printf("Curso encontrado: %+v", courseDetails)
+
+	return courseDetails, nil
 }
